@@ -38,6 +38,16 @@ Some notes about the architecture of this setup:
 * The [Google Cloud CLI][11] tools installed
 * [Terraform][12] installed
 
+## GCP permissions for Terraform
+
+If `terraform plan` or `terraform apply` fails with **`403`**, **`USER_PROJECT_DENIED`**, or text mentioning **`serviceusage.services.use`** / **`serviceusage.serviceUsageConsumer`** when reading the project, grant your Google account the **Service Usage Consumer** role on the GCP project (replace `PROJECT_ID` and your email):
+
+* `gcloud projects add-iam-policy-binding PROJECT_ID --member="user:you@gmail.com" --role="roles/serviceusage.serviceUsageConsumer"`
+
+The identity running Terraform must also be able to use **Application Default Credentials** after `gcloud auth application-default login` (see step 7 below).
+
+Resources that manage **billing budgets** may require additional **billing account** IAM roles; if those calls fail with permission errors, grant the appropriate role on the billing account in the Google Cloud console.
+
 ## Instructions
 1. If you haven't already, create your [DuckDNS][7] subdomain and make note of your authentication token.
     * ![DuckDNS Example](./readme_resources/ddns.png)
@@ -112,6 +122,13 @@ Some notes about the architecture of this setup:
         * **Important** This part of the configuration is critical to application data persisting across virtual machine reboots.
 16. Open your web browser and navigate to the fully-qualified domain name you set for the value of the "actual_fqdn" variable (i.e. ht<span>tps://</span>budget.example.duckdns.org). You should see the Actual Budget login page. You're now ready to setup your budget. Follow [Actual Budget's Getting Started][17] page for next steps.
     * ![Actual Budget login](./readme_resources/actual_login_page.png)
+
+## Troubleshooting
+
+* **DuckDNS IP does not match the VM’s external IP** — On the VM, run `sudo systemctl status duckdns` and `sudo journalctl -u duckdns -n 50 --no-pager`. If you see Docker **image pull** timeouts, wait for a retry (systemd is configured to restart) or check egress to the container registry. You can confirm your token with DuckDNS’s update URL (see their documentation); the VM uses the **`linuxserver/duckdns`** image from Docker Hub.
+* **`caddy` fails: bind source path does not exist … Caddyfile** — Usually the data disk is not mounted or was never formatted. On the VM, run `lsblk -f` and `findmnt /mnt/disks/data`. The first-boot script **`/usr/local/sbin/actual-gcp-fs-prepare.sh`** formats (once), mounts the persistent disk, and copies the Caddyfile; you can run it manually with `sudo /usr/local/sbin/actual-gcp-fs-prepare.sh` after fixing any disk issues.
+* **Let’s Encrypt / TLS errors in Caddy logs** — Ensure **`actual_fqdn` DNS** resolves to the VM’s public IP. Caddy publishes **ports 80 and 443**; the Terraform firewall already allows both for instances with the **`http-server`** and **`https-server`** tags. If validation was interrupted, you can stop Caddy, remove **`/mnt/disks/data/caddy/data/caddy`** on the data disk, and start Caddy again to clear stale ACME state (this forces new certificate requests).
+* **Existing VMs and `user-data` changes** — Updating instance metadata in Terraform does not always re-run all cloud-init stages on an existing disk. For a clean reset you may need to replace the instance or apply unit-file changes over SSH; new deployments pick up the generated cloud-config on first boot.
 
 ## Updating Actual Server
 There are a couple of ways you could use to try to update Actual Server to a newer version.
