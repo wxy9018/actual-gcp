@@ -1,0 +1,3 @@
+# Ensure cloud-init / bash on the VM always gets LF.
+files/*.sh text eol=lf
+tests/*.sh text eol=lf

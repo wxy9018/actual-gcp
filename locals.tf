@@ -67,32 +67,7 @@ locals {
       path        = "/usr/local/sbin/actual-gcp-fs-prepare.sh"
       permissions = "0544"
       owner       = "root"
-      content     = <<-EOT5
-            #!/bin/bash
-            set -euo pipefail
-
-            DISK=/dev/disk/by-id/google-persistent-disk-1
-            MOUNT=/mnt/disks/data
-
-            mkdir -p "$MOUNT"
-
-            FSTYPE="$(blkid -o value -s TYPE "$DISK" 2>/dev/null || true)"
-            if [ -z "$FSTYPE" ]; then
-              mkfs.ext4 -L data -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard "$DISK"
-            elif [ "$FSTYPE" != "ext4" ]; then
-              echo "actual-gcp-fs-prepare: $DISK has unexpected filesystem type '$FSTYPE' (expected ext4 or empty); refusing to mount." >&2
-              exit 1
-            else
-              fsck.ext4 -tfy "$DISK" || true
-            fi
-
-            if ! findmnt "$MOUNT" >/dev/null 2>&1; then
-              mount -t ext4 -o nodev,nosuid "$DISK" "$MOUNT"
-            fi
-
-            mkdir -p "$MOUNT/caddy/data" "$MOUNT/caddy/config" "$MOUNT/actual-data"
-            cp /tmp/Caddyfile "$MOUNT/caddy/Caddyfile"
-            EOT5
+      content     = file("${path.module}/files/fs-prepare.sh")
     }
   ]
 

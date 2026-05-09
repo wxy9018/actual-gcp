@@ -123,6 +123,16 @@ Resources that manage **billing budgets** may require additional **billing accou
 16. Open your web browser and navigate to the fully-qualified domain name you set for the value of the "actual_fqdn" variable (i.e. ht<span>tps://</span>budget.example.duckdns.org). You should see the Actual Budget login page. You're now ready to setup your budget. Follow [Actual Budget's Getting Started][17] page for next steps.
     * ![Actual Budget login](./readme_resources/actual_login_page.png)
 
+## Automated tests
+
+This repository includes checks that do **not** require a GCP project: `terraform fmt` / `validate`, a **cloud-config** smoke check (`local.cloud_config` must contain expected Caddy, DuckDNS, and fs-prepare fragments), **shellcheck** on `files/fs-prepare.sh`, and a **loop-device** test that runs the disk-prep script twice (Linux only).
+
+* See **[tests/README.md](./tests/README.md)** for how to run tests locally.
+* **GitHub Actions** runs them on push/PR (`.github/workflows/ci.yml`).
+* **Windows:** `powershell -File scripts/verify-local.ps1` runs fmt, init with **local state** (`-backend=false`), and validate. The fs-prepare test still needs **Linux** (or your fork’s Actions).
+
+A **full** `terraform apply` in your project remains the only way to verify Docker registry access, DuckDNS, and Let’s Encrypt end-to-end.
+
 ## Troubleshooting
 
 * **DuckDNS IP does not match the VM’s external IP** — On the VM, run `sudo systemctl status duckdns` and `sudo journalctl -u duckdns -n 50 --no-pager`. If you see Docker **image pull** timeouts, wait for a retry (systemd is configured to restart) or check egress to the container registry. You can confirm your token with DuckDNS’s update URL (see their documentation); the VM uses the **`linuxserver/duckdns`** image from Docker Hub.
