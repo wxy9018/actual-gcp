@@ -133,6 +133,8 @@ This repository includes checks that do **not** require a GCP project: `terrafor
 
 A **full** `terraform apply` in your project remains the only way to verify Docker registry access, DuckDNS, and Let’s Encrypt end-to-end.
 
+**Reboots:** The data disk is registered in **`/etc/fstab`** (after the first successful prepare run), and **`actual-gcp-prepare.service`** runs on every boot **before** Caddy/Actual so the disk is mounted, the **Caddyfile** on the persistent volume is used when `/tmp/Caddyfile` is gone, and the **`custom-bridge`** Docker network is recreated if needed.
+
 ## Troubleshooting
 
 * **DuckDNS IP does not match the VM’s external IP** — On the VM, run `sudo systemctl status duckdns` and `sudo journalctl -u duckdns -n 50 --no-pager`. If you see Docker **image pull** timeouts, wait for a retry (systemd is configured to restart) or check egress to the container registry. You can confirm your token with DuckDNS’s update URL (see their documentation); the VM uses the **`linuxserver/duckdns`** image from Docker Hub.

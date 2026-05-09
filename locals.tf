@@ -4,6 +4,26 @@ locals {
     ${yamlencode({
   write_files = [
     {
+      path        = "/etc/systemd/system/actual-gcp-prepare.service"
+      permissions = "0644"
+      owner       = "root"
+      content     = <<-EOT0
+            [Unit]
+            Description=Mount data disk, seed Caddyfile, ensure Docker bridge
+            After=docker.service
+            Requires=docker.service
+            Before=caddy.service actual.service
+
+            [Service]
+            Type=oneshot
+            RemainAfterExit=yes
+            ExecStart=/usr/local/sbin/actual-gcp-fs-prepare.sh
+
+            [Install]
+            WantedBy=multi-user.target
+            EOT0
+    },
+    {
       path        = "/etc/systemd/system/duckdns.service"
       permissions = "0644"
       owner       = "root"
@@ -28,7 +48,8 @@ locals {
       content     = <<-EOT2
             [Unit]
             Description=Start Caddy
-            After=docker.service
+            After=docker.service actual-gcp-prepare.service
+            Requires=docker.service actual-gcp-prepare.service
             Wants=docker.service
 
             [Service]
@@ -46,7 +67,8 @@ locals {
       content     = <<-EOT3
             [Unit]
             Description=Start Actual
-            After=docker.service
+            After=docker.service actual-gcp-prepare.service
+            Requires=docker.service actual-gcp-prepare.service
             Wants=docker.service
 
             [Service]
@@ -72,9 +94,9 @@ locals {
   ]
 
   runcmd = [
-    "/usr/local/sbin/actual-gcp-fs-prepare.sh",
-    "docker network create custom-bridge || true",
     "systemctl daemon-reload",
+    "systemctl enable actual-gcp-prepare.service",
+    "systemctl start actual-gcp-prepare.service",
     "systemctl start caddy.service",
     "systemctl start actual.service",
     "systemctl start duckdns.service"

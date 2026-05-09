@@ -27,6 +27,7 @@ expect_true 'strcontains(local.cloud_config, "80:80")'
 expect_true 'strcontains(local.cloud_config, "443:443")'
 expect_true 'strcontains(local.cloud_config, "Restart=always")'
 expect_true 'strcontains(local.cloud_config, "/usr/local/sbin/actual-gcp-fs-prepare.sh")'
+expect_true 'strcontains(local.cloud_config, "actual-gcp-prepare.service")'
 expect_true 'strcontains(local.cloud_config, "encode gzip zstd")'
 
 echo "check-cloud-config: OK"

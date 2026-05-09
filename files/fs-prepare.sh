@@ -20,8 +20,28 @@ else
 fi
 
 if ! findmnt "$MOUNT" >/dev/null 2>&1; then
-  mount -t ext4 -o nodev,nosuid "$DISK" "$MOUNT"
+  mount -t ext4 -o nodev,nosuid,nofail "$DISK" "$MOUNT"
 fi
 
 mkdir -p "$MOUNT/caddy/data" "$MOUNT/caddy/config" "$MOUNT/actual-data"
-cp "$CADDY_SOURCE" "$MOUNT/caddy/Caddyfile"
+
+# First boot: cloud-init writes /tmp/Caddyfile. Later boots: /tmp may be empty; keep copy on disk.
+if [ -f "$CADDY_SOURCE" ]; then
+  cp "$CADDY_SOURCE" "$MOUNT/caddy/Caddyfile"
+elif [ ! -f "$MOUNT/caddy/Caddyfile" ]; then
+  echo "actual-gcp-fs-prepare: missing $CADDY_SOURCE and no $MOUNT/caddy/Caddyfile" >&2
+  exit 1
+fi
+
+# Persist mount across reboots (COS: skip if testing with a non-standard MOUNT path).
+if [ "$MOUNT" = "/mnt/disks/data" ]; then
+  FSTAB_LINE='LABEL=data /mnt/disks/data ext4 nodev,nosuid,nofail 0 2'
+  if ! grep -qs '/mnt/disks/data' /etc/fstab; then
+    echo "$FSTAB_LINE" >>/etc/fstab
+  fi
+fi
+
+# Bridge for Caddy/Actual (safe if Docker is not up yet — e.g. some test environments).
+if [ -x /usr/bin/docker ] && /usr/bin/docker info >/dev/null 2>&1; then
+  /usr/bin/docker network create custom-bridge 2>/dev/null || true
+fi
