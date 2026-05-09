@@ -123,6 +123,52 @@ Resources that manage **billing budgets** may require additional **billing accou
 16. Open your web browser and navigate to the fully-qualified domain name you set for the value of the "actual_fqdn" variable (i.e. ht<span>tps://</span>budget.example.duckdns.org). You should see the Actual Budget login page. You're now ready to setup your budget. Follow [Actual Budget's Getting Started][17] page for next steps.
     * ![Actual Budget login](./readme_resources/actual_login_page.png)
 
+## Deploy, re-deploy, and `terraform plan`
+
+### Normal deploy
+
+* `terraform plan` — review pending changes.
+* `terraform apply` — apply after confirmation.
+
+Always read the plan summary (e.g. **0 added, 1 changed, 0 destroyed**) before typing `yes`.
+
+### How to read the plan (replace vs same VM)
+
+| Plan wording | Meaning |
+|--------------|--------|
+| **`will be updated in-place`** (changes marked with `~`) | Terraform updates that resource **without destroying it**. For the Compute instance, this often means **same VM**, e.g. metadata / `user-data` updated. |
+| **`must be replaced`**, **`-/+`**, or **destroy + create** | Terraform **destroys and recreates** that resource. For the VM you get a **new** instance; an **ephemeral** public IP may **change** (update DuckDNS or wait for the updater). |
+| **`will be destroyed`** | Resource removed (sometimes as part of a **replace**). |
+
+Check **`google_compute_disk`** lines too: this project uses a **separate data disk**; the plan should show whether disks are **replaced** (data loss on that disk) or **unchanged**.
+
+### Re-deploy: forcing a **new** VM (full cloud-init)
+
+When you change **cloud-init** / `user-data` and need the instance to behave like a **first boot** (new systemd units, scripts on disk), an **in-place** metadata update **may not** re-run everything on the existing disk. Options:
+
+1. **Replace the instance** (common):
+
+   Confirm the resource address (usually `google_compute_instance.container_host`):
+
+   * `terraform state list`
+
+   Then apply with **replace** (use **quotes** on Windows PowerShell so the address is not broken across lines):
+
+   * `terraform plan -replace="google_compute_instance.container_host"`
+   * `terraform apply -replace="google_compute_instance.container_host"`
+
+   If Terraform reports **`Invalid force-replace address`**, the full **`type.name`** was not passed; use the quoted one-liner above.
+
+2. **Keep the VM** — SSH in and align **`/etc/systemd/system/*.service`**, **`/usr/local/sbin/actual-gcp-fs-prepare.sh`**, then `systemctl daemon-reload`, `systemctl enable --now actual-gcp-prepare.service` (if applicable), and restart **`caddy`** / **`actual`** / **`duckdns`**. Use the **`user-data`** shown in GCP Console → VM → **Edit** → **Metadata** as the source of truth, or copy from this repo’s generated templates.
+
+### Metadata-only apply (same VM)
+
+If `apply` reports **`0 added, 1 changed, 0 destroyed`** and only **`google_compute_instance.container_host`** changed, Terraform updated the **live instance metadata** (e.g. new `user-data` text). The **running OS** may still be on the **old** layout until you **replace** the VM or **manually** refresh units/scripts (see above).
+
+### HCP Terraform “Variables” and Local execution
+
+If the workspace uses **Local (custom)** execution (step 3 above), the HCP UI **does not** offer a usable **Variables** tab for your CLI runs, and workspace variables are **not** applied to local `terraform plan` / `apply`. Use **`sensitive.auto.tfvars`** (and optional **`TF_VAR_...`** environment variables). To use HCP-stored variables, switch the workspace to **Remote** execution and configure **GCP** credentials for remote runs (e.g. **`GOOGLE_CREDENTIALS`**). See [HCP Terraform variable docs](https://developer.hashicorp.com/terraform/cloud-docs/workspaces/variables/managing-variables).
+
 ## Automated tests
 
 This repository includes checks that do **not** require a GCP project: `terraform fmt` / `validate`, a **cloud-config** smoke check (`local.cloud_config` must contain expected Caddy, DuckDNS, and fs-prepare fragments), **shellcheck** on `files/fs-prepare.sh`, and a **loop-device** test that runs the disk-prep script twice (Linux only).
@@ -137,10 +183,51 @@ A **full** `terraform apply` in your project remains the only way to verify Dock
 
 ## Troubleshooting
 
+### Quick checks on the VM (SSH)
+
+Run these first when something is wrong after deploy or reboot:
+
+```bash
+sudo systemctl status caddy actual duckdns actual-gcp-prepare --no-pager -l
+docker ps -a
+lsblk -f
+findmnt /mnt/disks/data
+ls -la /mnt/disks/data/caddy/Caddyfile 2>/dev/null || true
+```
+
+Logs:
+
+```bash
+sudo journalctl -u caddy -n 80 --no-pager -l
+sudo journalctl -u actual -n 80 --no-pager -l
+sudo journalctl -u duckdns -n 80 --no-pager -l
+sudo journalctl -u actual-gcp-prepare -n 80 --no-pager -l
+docker logs caddy 2>&1 | tail -50
+docker logs actual_server 2>&1 | tail -40
+docker logs duckdns 2>&1 | tail -30
+```
+
+**Docker exit code 125** on `caddy` / `actual` usually means **`docker run` never started the container** (missing bind path, missing **`custom-bridge`** network, image pull failure). Check the **`docker[...]`** line in **`journalctl`** for the exact message.
+
+**One-shot recovery** (disk + Caddyfile + bridge; safe to re-run when the script is idempotent):
+
+```bash
+sudo /usr/local/sbin/actual-gcp-fs-prepare.sh
+sudo docker network create custom-bridge 2>/dev/null || true
+sudo systemctl restart caddy actual duckdns
+```
+
+### Common issues
+
 * **DuckDNS IP does not match the VM’s external IP** — On the VM, run `sudo systemctl status duckdns` and `sudo journalctl -u duckdns -n 50 --no-pager`. If you see Docker **image pull** timeouts, wait for a retry (systemd is configured to restart) or check egress to the container registry. You can confirm your token with DuckDNS’s update URL (see their documentation); the VM uses the **`linuxserver/duckdns`** image from Docker Hub.
-* **`caddy` fails: bind source path does not exist … Caddyfile** — Usually the data disk is not mounted or was never formatted. On the VM, run `lsblk -f` and `findmnt /mnt/disks/data`. The first-boot script **`/usr/local/sbin/actual-gcp-fs-prepare.sh`** formats (once), mounts the persistent disk, and copies the Caddyfile; you can run it manually with `sudo /usr/local/sbin/actual-gcp-fs-prepare.sh` after fixing any disk issues.
+* **`caddy` fails: bind source path does not exist … Caddyfile** — Usually the data disk is not mounted or was never formatted. On the VM, run `lsblk -f` and `findmnt /mnt/disks/data`. The script **`/usr/local/sbin/actual-gcp-fs-prepare.sh`** formats (once), mounts the persistent disk, and copies the Caddyfile when **`/tmp/Caddyfile`** exists or keeps the copy on the data disk on later boots; run it manually with `sudo /usr/local/sbin/actual-gcp-fs-prepare.sh` after fixing any disk issues.
 * **Let’s Encrypt / TLS errors in Caddy logs** — Ensure **`actual_fqdn` DNS** resolves to the VM’s public IP. Caddy publishes **ports 80 and 443**; the Terraform firewall already allows both for instances with the **`http-server`** and **`https-server`** tags. If validation was interrupted, you can stop Caddy, remove **`/mnt/disks/data/caddy/data/caddy`** on the data disk, and start Caddy again to clear stale ACME state (this forces new certificate requests).
-* **Existing VMs and `user-data` changes** — Updating instance metadata in Terraform does not always re-run all cloud-init stages on an existing disk. For a clean reset you may need to replace the instance or apply unit-file changes over SSH; new deployments pick up the generated cloud-config on first boot.
+* **Existing VMs and `user-data` changes** — Updating instance metadata in Terraform does not always re-run all cloud-init stages on an existing disk. For a clean reset you may need to **replace** the instance (`terraform apply -replace="google_compute_instance.container_host"`) or apply unit-file changes over SSH; new deployments pick up the generated cloud-config on first boot.
+
+### From your laptop
+
+* **HTTPS / headers:** `curl.exe -I https://YOUR_ACTUAL_FQDN` (PowerShell: use **`curl.exe`**, not **`curl`**, which is an alias for `Invoke-WebRequest`).
+* **DNS:** `Resolve-DnsName YOUR_ACTUAL_FQDN -Type A` or `nslookup` on Windows; on COS, `getent hosts` or DNS-over-HTTPS `curl` if `nslookup` is missing.
 
 ## Updating Actual Server
 There are a couple of ways you could use to try to update Actual Server to a newer version.
