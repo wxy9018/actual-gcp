@@ -1,10 +1,10 @@
 terraform {
   cloud {
 
-    organization = "your-organization"
+    organization = "Xiaoyu-And-Chuan"
 
     workspaces {
-      name = "your-workspace"
+      name = "family_ledger"
     }
   }
 }
